@@ -35,17 +35,13 @@ export default function Dashboard() {
       : []),
   ];
 
-  const [buku, setBuku] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    setLoading(true);
-    api
-      .get("/buku")
-      .then((res) => setBuku(res.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+  const refreshAuditIfOpen = async (bukuId) => {
+    if (auditVisible && auditBook?.id === bukuId) {
+      await fetchAudit(1, bukuId);
+    }
+  };
 
   const handleDelete = async (rowData) => {
     const result = await Swal.fire({
@@ -63,6 +59,14 @@ export default function Dashboard() {
       Swal.showLoading();
       try {
         await api.delete(`/buku/${rowData.id}`);
+
+        // PERBAIKAN: Tutup dialog audit jika buku yang dihapus sedang ditampilkan
+        if (auditVisible && auditBook?.id === rowData.id) {
+          setAuditVisible(false);
+          setAuditBook(null);
+          setAuditItems([]);
+        }
+
         await getDataBuku();
         Swal.fire({
           title: "Berhasil!",
@@ -96,6 +100,13 @@ export default function Dashboard() {
         aria-label="Delete"
         onClick={() => handleDelete(rowData)}
         tooltip="Hapus"
+      />
+      <Button
+        icon="pi pi-history"
+        className="p-button-sm p-button-text"
+        aria-label="Riwayat"
+        onClick={() => openAudit(rowData)}
+        tooltip="Riwayat"
       />
     </div>
   );
@@ -147,6 +158,7 @@ export default function Dashboard() {
           tahun: Number(form.tahun),
           stok: Number(form.stok),
         });
+
         Swal.fire({
           icon: "success",
           title: "Berhasil!",
@@ -154,6 +166,11 @@ export default function Dashboard() {
           timer: 1500,
           showConfirmButton: false,
         });
+
+        // PERBAIKAN: Refresh audit data jika dialog audit sedang terbuka dan untuk buku yang sama
+        if (auditVisible && auditBook?.id === form.id) {
+          await fetchAudit(1, form.id); // refresh audit data
+        }
       }
 
       setVisible(false);
@@ -165,7 +182,7 @@ export default function Dashboard() {
         stok: "",
         deskripsi: "",
       });
-      getDataBuku();
+      await getDataBuku(); // Gunakan await untuk memastikan data terupdate
     } catch (err) {
       if (err.response?.data?.errors) setErrors(err.response.data.errors);
       else Swal.fire({ icon: "error", title: "Gagal!", text: "Proses gagal." });
@@ -175,7 +192,6 @@ export default function Dashboard() {
   };
 
   const [bukuList, setBukuList] = useState([]);
-  const [formVisible, setFormVisible] = useState(false);
 
   const getDataBuku = async () => {
     const res = await api.get("/buku");
@@ -204,6 +220,200 @@ export default function Dashboard() {
   const [mode, setMode] = useState("add");
 
   const short = (t, n = 80) => (t?.length > n ? t.slice(0, n) + "…" : t || "-");
+
+  // + tambahkan state untuk audit
+  const [auditVisible, setAuditVisible] = useState(false);
+  const [auditBook, setAuditBook] = useState(null);
+  const [auditItems, setAuditItems] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditPage, setAuditPage] = useState({ page: 1, rows: 10, total: 0 });
+
+  // + helper format & diff
+  const formatVal = (v) =>
+    v === null || v === undefined
+      ? "—"
+      : typeof v === "object"
+      ? JSON.stringify(v)
+      : String(v);
+
+  const diffTemplate = (row) => {
+    const oldVals = row.old_values || {};
+    const newVals = row.new_values || {};
+    if (row.event === "created")
+      return <span className="text-500">Nilai awal dibuat.</span>;
+    if (row.event === "deleted")
+      return <span className="text-500">Data dihapus.</span>;
+    const keys = Array.from(
+      new Set([...Object.keys(oldVals), ...Object.keys(newVals)])
+    );
+    return (
+      <div className="flex flex-column gap-1">
+        {keys.map((k) => {
+          if (["id", "created_at", "updated_at"].includes(k)) return null;
+          const before = oldVals[k];
+          const after = newVals[k];
+          if (JSON.stringify(before) === JSON.stringify(after)) return null;
+          return (
+            <div key={k} className="text-sm">
+              <span className="font-medium text-700">{k}</span>
+              <span className="mx-2 text-500">:</span>
+              <span className="line-through text-500 break-all">
+                {formatVal(before)}
+              </span>
+              <span className="mx-2">→</span>
+              <span className="font-semibold break-all">
+                {formatVal(after)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const openAudit = async (row) => {
+    console.log("openAudit: Starting for book:", row.id);
+
+    // Check auth status first
+    const isAuthenticated = await checkAuthStatus();
+    if (!isAuthenticated) {
+      Swal.fire({
+        icon: "error",
+        title: "Session Expired",
+        text: "Silakan login kembali untuk melihat audit.",
+      });
+      return;
+    }
+
+    setAuditLoading(true);
+    try {
+      const { data } = await api.get(`/buku/${row.id}`);
+      const bukuData = data.data || data;
+      setAuditBook(bukuData);
+      setAuditVisible(true);
+
+      // Reset audit state sebelum fetch data baru
+      setAuditItems([]);
+      setAuditPage({ page: 1, rows: 10, total: 0 });
+
+      await fetchAudit(1, row.id);
+    } catch (error) {
+      console.error("openAudit: Error fetching book details:", error);
+      setAuditBook(row); // fallback
+      setAuditVisible(true);
+      setAuditItems([]);
+      await fetchAudit(1, row.id);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const fetchAudit = async (page = 1, id = auditBook?.id) => {
+    if (!id) {
+      console.log("fetchAudit: No ID provided");
+      return;
+    }
+
+    console.log("fetchAudit: Starting fetch for ID:", id, "Page:", page);
+    setAuditLoading(true);
+
+    try {
+      // DEBUGGING: Log request details
+      const token =
+        localStorage.getItem("token") || sessionStorage.getItem("token");
+      console.log("fetchAudit: Token exists:", !!token);
+      console.log("fetchAudit: Request URL:", `/buku/${id}/audits`);
+
+      const { data } = await api.get(`/buku/${id}/audits`, {
+        params: {
+          page,
+          per_page: auditPage.rows || 10,
+        },
+        headers: {
+          Authorization: `Bearer ${token}`, // Eksplisit tambahkan token
+        },
+      });
+
+      console.log("fetchAudit: Response received:", data);
+
+      // Handle 2 kemungkinan bentuk response
+      const payload = Array.isArray(data?.data) ? data : data?.data ?? data;
+
+      const auditData = payload?.data ?? [];
+      console.log("fetchAudit: Processed audit data:", auditData);
+
+      setAuditItems(auditData);
+      setAuditPage({
+        page: payload?.current_page ?? 1,
+        rows: payload?.per_page ?? 10,
+        total: payload?.total ?? auditData.length,
+      });
+
+      console.log("fetchAudit: State updated successfully");
+    } catch (e) {
+      console.error("fetchAudit: Error details:", {
+        message: e.message,
+        status: e.response?.status,
+        data: e.response?.data,
+        headers: e.response?.headers,
+      });
+
+      if (e.response?.status === 401) {
+        Swal.fire({
+          icon: "error",
+          title: "Session Expired",
+          text: "Silakan login kembali.",
+          confirmButtonText: "OK",
+        }).then(() => {
+          // Redirect to login atau logout
+          if (typeof logout === "function") {
+            logout();
+          }
+        });
+      } else {
+        Swal.fire({
+          icon: "error",
+          title: "Error",
+          text: `Gagal memuat data audit: ${
+            e.response?.data?.message || e.message
+          }`,
+          timer: 3000,
+          showConfirmButton: false,
+        });
+      }
+
+      setAuditItems([]);
+      setAuditPage({ page: 1, rows: 10, total: 0 });
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  // ganti fungsi lama
+  const checkAuthStatus = async () => {
+    const token =
+      localStorage.getItem("token") || sessionStorage.getItem("token");
+    if (!token) return false;
+
+    try {
+      // token otomatis ikut via interceptor
+      const res = await api.get("/user");
+      console.log("Auth check OK:", res.data);
+      return true;
+    } catch (error) {
+      console.log(
+        "Auth check failed:",
+        error.response?.status,
+        error.response?.data
+      );
+      return false;
+    }
+  };
+
+  const onAuditPage = (e) => {
+    const next = e.first / e.rows + 1;
+    fetchAudit(next);
+  };
 
   return (
     <div
@@ -323,6 +533,69 @@ export default function Dashboard() {
             />
           </DataTable>
         </Card>
+
+        <Dialog
+          header={
+            <span className="font-bold text-xl text-primary">
+              Riwayat Perubahan — {auditBook?.judul}
+            </span>
+          }
+          visible={auditVisible}
+          style={{ width: "100%", maxWidth: 800, boxShadow: "none" }} // ← tambahkan ini
+          onHide={() => setAuditVisible(false)}
+          breakpoints={{ "960px": "95vw", "640px": "98vw" }}
+          className="p-4"
+        >
+          <DataTable
+            value={auditItems}
+            loading={auditLoading}
+            paginator
+            rows={auditPage.rows}
+            totalRecords={auditPage.total}
+            first={(auditPage.page - 1) * auditPage.rows}
+            onPage={onAuditPage}
+            responsiveLayout="scroll"
+            emptyMessage="Belum ada audit untuk buku ini."
+            className="p-datatable-sm"
+          >
+            <Column
+              header="Waktu"
+              body={(row) => {
+                const d = new Date(row.created_at);
+                return (
+                  <div className="flex flex-column">
+                    <span className="font-medium">
+                      {d.toLocaleString(undefined, {
+                        year: "numeric",
+                        month: "short",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                );
+              }}
+              style={{ width: "16rem" }}
+            />
+            <Column
+              header="User"
+              body={(row) =>
+                row.user ? (
+                  <div className="flex flex-column">
+                    <span className="font-medium">{row.user.nama}</span>
+                    <span className="text-500 text-sm">{row.user.email}</span>
+                  </div>
+                ) : (
+                  <span className="text-500 italic">system</span>
+                )
+              }
+              style={{ width: "16rem" }}
+            />
+            <Column header="Event" field="event" style={{ width: "8rem" }} />
+            <Column header="Perubahan" body={diffTemplate} />
+          </DataTable>
+        </Dialog>
 
         <div className="card flex justify-content-center">
           <Dialog

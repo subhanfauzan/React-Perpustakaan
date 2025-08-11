@@ -1,20 +1,28 @@
+// /src/api/axios.js
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE || "http://localhost:8000/api",
-  headers: { "Content-Type": "application/json" },
+  baseURL: "http://localhost:8000/api",
 });
 
-// Pasang interceptor untuk menambahkan Authorization header otomatis
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem("token");
-    if (token) {
-      config.headers["Authorization"] = `Bearer ${token}`;
+// selalu sisipkan Bearer token dari storage
+api.interceptors.request.use((config) => {
+  const t = localStorage.getItem("token");
+  if (t) config.headers.Authorization = `Bearer ${t}`;
+  return config;
+});
+
+// handling 401 global (opsional redirect)
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      // window.location.href = "/login"; // aktifkan kalau mau auto-redirect
     }
-    return config;
-  },
-  (error) => Promise.reject(error)
+    return Promise.reject(err);
+  }
 );
 
 export default api;
