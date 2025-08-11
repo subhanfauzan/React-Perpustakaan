@@ -1,18 +1,24 @@
 import React from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
+/**
+ * ProtectedRoute
+ * - Wajib login.
+ * - Jika roles diberikan, pastikan user.role termasuk di roles tsb.
+ * - Belum login -> ke /login (bawa state.from)
+ * - Role tidak cocok -> ke /dashboard
+ */
 const ProtectedRoute = ({ children, roles }) => {
   const { user } = useAuth();
+  const location = useLocation();
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  // Jika props roles diberikan, cek apakah user.role ada di list
-  if (roles && Array.isArray(roles) && !roles.includes(user.role)) {
-    // akses ditolak, redirect ke landing atau halaman lain
-    return <Navigate to="/" replace />;
+  if (Array.isArray(roles) && roles.length > 0 && !roles.includes(user.role)) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return children;

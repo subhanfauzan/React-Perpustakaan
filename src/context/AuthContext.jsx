@@ -12,12 +12,22 @@ export const AuthProvider = ({ children }) => {
   });
 
   const login = async (email, password) => {
-    // Panggil endpoint /login di backend, harus mengembalikan { token, user }
     const res = await api.post("/login", { email, password });
     const { token, user } = res.data;
+
     localStorage.setItem("token", token);
     localStorage.setItem("user", JSON.stringify(user));
     setUser(user);
+
+    // Arahkan berdasarkan role
+    if (user.role === "admin super") {
+      navigate("/user");
+    } else if (user.role === "admin") {
+      navigate("/buku");
+    } else if (user.role === "anggota") {
+      navigate("/dashboard");
+    }
+
     return user;
   };
 

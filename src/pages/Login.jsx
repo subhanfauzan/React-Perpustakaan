@@ -15,8 +15,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      await login(email, password);
-      navigate("/dashboard");
+      await login(email, password); // navigasi akan di-handle oleh AuthContext
     } catch (err) {
       alert(err?.response?.data?.message || "Login gagal");
     } finally {

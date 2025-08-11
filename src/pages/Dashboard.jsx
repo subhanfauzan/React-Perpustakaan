@@ -7,14 +7,16 @@ import { useNavigate } from "react-router-dom";
 
 export default function Dashboard() {
   const [sidebarVisible, setSidebarVisible] = useState(false);
-  const { logout } = useContext(AuthContext);
+  const { logout, user } = useContext(AuthContext);
   const navigate = useNavigate();
 
   const menuItems = [
     { icon: "pi pi-home", label: "Dashboard", path: "/dashboard" },
     { icon: "pi pi-book", label: "Buku", path: "/buku" },
     { icon: "pi pi-calendar", label: "Peminjaman", path: "/peminjaman" },
-    { icon: "pi pi-user", label: "Akun", path: "/user" },
+    ...(user?.role === "admin super"
+      ? [{ icon: "pi pi-user", label: "Akun", path: "/user" }]
+      : []),
   ];
 
   return (

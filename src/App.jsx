@@ -8,24 +8,37 @@ import User from "./pages/User";
 import RoleManagement from "./pages/RoleManagement";
 import UserManagement from "./pages/UserManagement";
 import ProtectedRoute from "./components/ProtectedRoute";
-import Navbar from "./components/Navbar";
 import "./app.css";
-import { PrimeReactProvider, PrimeReactContext } from "primereact/api";
+import { PrimeReactProvider } from "primereact/api";
+
+// NOTE:
+// - Saya proteksi /buku (butuh login).
+// - /user & /users khusus admin super (ubah sesuai kebijakanmu).
+// - Hapus import yang tidak dipakai (Navbar, PrimeReactContext) biar bersih.
 
 export default function App() {
   return (
-    <>
+    <PrimeReactProvider>
       <Routes>
+        {/* Public */}
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/buku" element={<Buku />} />
-        <Route path="/user" element={<User />} />
+
+        {/* Private (login role apa pun) */}
         <Route
           path="/dashboard"
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/buku"
+          element={
+            <ProtectedRoute>
+              <Buku />
             </ProtectedRoute>
           }
         />
@@ -37,15 +50,29 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
+        {/* Admin Super only — ganti sesuai kebijakanmu */}
+        <Route
+          path="/user"
+          element={
+            <ProtectedRoute roles={["admin super"]}>
+              <User />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/users"
           element={
-            <ProtectedRoute roles={["admin"]}>
+            <ProtectedRoute roles={["admin super"]}>
               <UserManagement />
             </ProtectedRoute>
           }
         />
+
+        {/* (Opsional) 404
+        <Route path="*" element={<div className="p-4">Halaman tidak ditemukan</div>} />
+        */}
       </Routes>
-    </>
+    </PrimeReactProvider>
   );
 }
