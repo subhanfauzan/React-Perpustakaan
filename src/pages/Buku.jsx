@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect } from "react";
+import React, { useContext, useState, useEffect, useRef } from "react";
 import { Button } from "primereact/button";
 import { Avatar } from "primereact/avatar";
 import { Sidebar } from "primereact/sidebar";
@@ -415,6 +415,93 @@ export default function Dashboard() {
     fetchAudit(next);
   };
 
+  // ====== Tambahkan state & ref (di dalam component) ======
+  const fileRef = useRef(null);
+  const [importLoading, setImportLoading] = useState(false);
+
+  const handlePickImport = () => fileRef.current?.click();
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const allowed = [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+      "text/csv",
+    ];
+    if (
+      !allowed.includes(file.type) &&
+      !file.name.match(/\.(xlsx|xls|csv)$/i)
+    ) {
+      Swal.fire({
+        icon: "warning",
+        title: "Format tidak didukung",
+        text: "Pilih file .xlsx, .xls, atau .csv",
+      });
+      e.target.value = "";
+      return;
+    }
+
+    const fd = new FormData();
+    fd.append("file", file);
+
+    setImportLoading(true);
+    try {
+      await api.post("/buku/import", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      Swal.fire({
+        icon: "success",
+        title: "Import berhasil",
+        timer: 1500,
+        showConfirmButton: false,
+      });
+      await getDataBuku();
+    } catch (err) {
+      const msg =
+        err.response?.data?.message ||
+        (Array.isArray(err.response?.data?.errors)
+          ? "Validasi gagal pada beberapa baris"
+          : "Gagal import");
+      Swal.fire({ icon: "error", title: "Gagal", text: msg });
+    } finally {
+      setImportLoading(false);
+      // reset input supaya bisa upload file yang sama lagi
+      e.target.value = "";
+    }
+  };
+
+  const [exportLoading, setExportLoading] = useState(false);
+
+  const handleExport = async () => {
+    try {
+      setExportLoading(true);
+      const res = await api.get("/buku/export", { responseType: "blob" });
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `buku_${new Date()
+        .toISOString()
+        .slice(0, 19)
+        .replace(/[:T]/g, "")}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      Swal.fire({
+        icon: "error",
+        title: "Gagal export",
+        text: err.response?.data?.message || err.message,
+      });
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   return (
     <div
       className="min-h-screen bg-gradient-to-tr from-blue-50 via-purple-100 to-blue-100"
@@ -486,7 +573,28 @@ export default function Dashboard() {
       </Sidebar>
 
       <div className="p-4">
-        <div className="flex justify-content-end mb-3">
+        <div className="flex justify-content-end gap-2 mb-3">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleImportFile}
+            style={{ display: "none" }}
+          />
+          <Button
+            label="Export Excel"
+            icon="pi pi-download"
+            className="p-button-secondary"
+            onClick={handleExport}
+            loading={exportLoading}
+          />
+          <Button
+            label="Import Excel"
+            icon="pi pi-upload"
+            className="p-button-help"
+            onClick={handlePickImport}
+            loading={importLoading}
+          />
           <Button
             label="Tambah Data"
             icon="pi pi-plus"
